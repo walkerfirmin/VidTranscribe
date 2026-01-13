@@ -74,9 +74,16 @@ function defaultExtractOutputPath(videoPath, audioIndex, format) {
   return path.join(dir, `${base}.a${audioIndex}.${format}`);
 }
 
-function defaultExtractOutputPathInDir({ videoPath, audioIndex, format, outDir }) {
+function safeLangTag(value) {
+  const lang = String(value ?? '').trim();
+  if (!lang) return 'und';
+  return lang.replace(/[^A-Za-z0-9-]+/g, '_');
+}
+
+function defaultExtractOutputPathInDir({ videoPath, audioIndex, lang, format, outDir }) {
   const base = path.basename(videoPath, path.extname(videoPath));
-  return path.join(outDir, `${base}.a${audioIndex}.${format}`);
+  const safeLang = safeLangTag(lang);
+  return path.join(outDir, `${base}.a${audioIndex}.${safeLang}.${format}`);
 }
 
 function parseTracksList(value) {
@@ -99,10 +106,11 @@ function parseTracksList(value) {
   return [...new Set(indices)];
 }
 
-function deriveTranscriptPath({ engine, outDir, videoPath, audioIndex }) {
+function deriveTranscriptPath({ engine, outDir, videoPath, audioIndex, lang }) {
   const base = path.basename(videoPath, path.extname(videoPath));
   const ext = engine === 'mlx' ? 'srt' : 'txt';
-  return path.join(outDir, `${base}.a${audioIndex}.${ext}`);
+  const safeLang = safeLangTag(lang);
+  return path.join(outDir, `${base}.a${audioIndex}.${safeLang}.${ext}`);
 }
 
 async function extractAudio({ videoPath, audioIndex, outPath, format }) {
@@ -157,7 +165,7 @@ async function transcribeWithWhisperOpenAI({ audioPath, outPath, language, promp
   return text;
 }
 
-async function transcribeWithMlxWhisper({ audioPath, outPath }) {
+async function transcribeWithMlxWhisper({ audioPath, outPath, language, prompt }) {
   await assertCommandExists('mlx_whisper');
 
   const { outputDir, outputName, expectedSrtPath } = deriveMlxOutput({
@@ -171,10 +179,12 @@ async function transcribeWithMlxWhisper({ audioPath, outPath }) {
     'mlx-community/whisper-large-v3-mlx',
     '--task',
     'transcribe',
+    ...(language ? ['--language', String(language)] : []),
     '--temperature',
     '0',
     '--verbose',
     'True',
+    ...(prompt ? ['--initial-prompt', String(prompt)] : []),
     '--condition-on-previous-text',
     'False',
     '--compression-ratio-threshold',
@@ -276,9 +286,6 @@ export async function main(argv) {
         if (engine !== 'openai' && engine !== 'mlx') {
           throw new Error(`Unknown --engine: ${options.engine}. Use openai or mlx.`);
         }
-        if (engine === 'mlx' && (options.language || options.prompt)) {
-          throw new Error('For --engine mlx, --language/--prompt are not supported yet (using the fixed preset config).');
-        }
       }
 
       const outDir = options.outDir ? path.resolve(options.outDir) : path.dirname(video);
@@ -289,11 +296,13 @@ export async function main(argv) {
       }
 
       for (const audioIndex of selectedTracks) {
+        const lang = tracks?.[audioIndex]?.language;
         const audioOutPath = options.out
           ? options.out
           : defaultExtractOutputPathInDir({
               videoPath: video,
               audioIndex,
+              lang,
               format: options.format,
               outDir,
             });
@@ -313,12 +322,15 @@ export async function main(argv) {
             outDir,
             videoPath: video,
             audioIndex,
+            lang,
           });
 
           if (engine === 'mlx') {
             const srtPath = await transcribeWithMlxWhisper({
               audioPath: out,
               outPath: transcriptPath,
+              language: options.language,
+              prompt: options.prompt,
             });
             process.stdout.write(`${srtPath}\n`);
           } else {
@@ -347,12 +359,11 @@ export async function main(argv) {
 
       const engine = String(options.engine ?? 'openai').toLowerCase();
       if (engine === 'mlx') {
-        if (options.language || options.prompt) {
-          throw new Error('For --engine mlx, --language/--prompt are not supported yet (using the fixed preset config).');
-        }
         const srtPath = await transcribeWithMlxWhisper({
           audioPath: audio,
           outPath: options.out,
+          language: options.language,
+          prompt: options.prompt,
         });
         process.stdout.write(`${srtPath}\n`);
         return;

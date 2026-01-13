@@ -6,11 +6,31 @@ A small Node.js CLI (Commander) that:
 - Extracts a chosen audio track to an audio file using `ffmpeg`
 - Transcribes an audio file using Whisper (OpenAI Whisper API)
 
+
 ## Prereqs
 
 - Node.js >= 18
+- Python >= 3.8 (for local Whisper/MLX workflows)
 - `ffmpeg` + `ffprobe` installed (macOS: `brew install ffmpeg`)
-- For transcription: set `OPENAI_API_KEY`
+- For OpenAI transcription: set `OPENAI_API_KEY`
+
+### Python dependencies (for local Whisper/MLX)
+
+If you want to use local Whisper/MLX (e.g., `mlx_whisper`), set up a Python virtual environment and install dependencies:
+
+```bash
+# Create and activate a virtual environment (recommended)
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Upgrade pip and install requirements
+pip install --upgrade pip
+pip install mlx-whisper
+# Or, for other local Whisper tools, install as needed
+# pip install openai-whisper
+```
+
+If you use a system-wide Python, you may need to use `pip3` instead of `pip`.
 
 ## Install
 
