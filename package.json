@@ -1,0 +1,20 @@
+{
+  "name": "vidtranscribe",
+  "version": "0.1.0",
+  "description": "CLI to list/extract multi-track audio from video with ffmpeg and transcribe with Whisper.",
+  "type": "module",
+  "bin": {
+    "vidtranscribe": "./bin/vidtranscribe.js"
+  },
+  "scripts": {
+    "start": "node ./bin/vidtranscribe.js",
+    "lint": "node -c ./src/cli.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "openai": "^4.28.0"
+  }
+}
