@@ -245,6 +245,73 @@ export async function main(argv) {
     });
 
   program
+    .command('batch')
+    .description(
+      'Create subtitles (.srt) for all audio tracks in one or more video files (mlx engine). Writes to a sibling folder named after the video.'
+    )
+    .argument('<videos...>', 'one or more video file paths')
+    .option('--format <wav|m4a>', 'intermediate extracted audio format', 'wav')
+    .option('--language <code>', 'Language code for mlx_whisper (e.g., en). See `mlx_whisper --help` for supported values.')
+    .option('--prompt <text>', 'optional prompt to guide transcription')
+    .action(async (videos, options) => {
+      const format = String(options.format ?? 'wav').toLowerCase();
+      if (format !== 'wav' && format !== 'm4a') {
+        throw new Error(`Unsupported format: ${options.format}. Use wav or m4a.`);
+      }
+
+      for (const inputVideo of videos) {
+        const video = path.resolve(String(inputVideo));
+        await assertFileExists(video);
+
+        const outDir = path.join(path.dirname(video), path.basename(video, path.extname(video)));
+        await fs.promises.mkdir(outDir, { recursive: true });
+
+        const tracks = await getAudioTracks(video);
+        if (tracks.length === 0) {
+          process.stdout.write(`${video}: no audio tracks found\n`);
+          continue;
+        }
+
+        for (const t of tracks) {
+          const audioIndex = t.audioIndex;
+          const lang = t.language;
+
+          const audioOutPath = defaultExtractOutputPathInDir({
+            videoPath: video,
+            audioIndex,
+            lang,
+            format,
+            outDir,
+          });
+
+          const extractedAudioPath = await extractAudio({
+            videoPath: video,
+            audioIndex,
+            outPath: audioOutPath,
+            format,
+          });
+
+          const transcriptPath = deriveTranscriptPath({
+            engine: 'mlx',
+            outDir,
+            videoPath: video,
+            audioIndex,
+            lang: options.language ?? lang,
+          });
+
+          const srtPath = await transcribeWithMlxWhisper({
+            audioPath: extractedAudioPath,
+            outPath: transcriptPath,
+            language: options.language,
+            prompt: options.prompt,
+          });
+
+          process.stdout.write(`${srtPath}\n`);
+        }
+      }
+    });
+
+  program
     .command('extract')
     .description('Extract a specific audio track from a video using ffmpeg')
     .argument('<video>', 'path to video file')
@@ -255,7 +322,7 @@ export async function main(argv) {
     .option('--format <wav|m4a>', 'output format', 'wav')
     .option('--transcribe', 'after extracting, automatically transcribe each extracted track')
     .option('--engine <openai|mlx>', 'transcription engine for --transcribe (openai uses OPENAI_API_KEY; mlx uses local mlx_whisper)', 'openai')
-    .option('--language <code>', 'language hint for --engine openai (e.g., en)')
+    .option('--language <code>', 'language code hint (e.g., en)')
     .option('--prompt <text>', 'prompt for --engine openai to guide transcription')
     .action(async (video, options) => {
       await assertFileExists(video);
@@ -352,7 +419,7 @@ export async function main(argv) {
     .argument('<audio>', 'path to audio file (wav/m4a/mp3, etc.)')
     .option('--out <path>', 'write transcript to a file instead of stdout')
     .option('--engine <openai|mlx>', 'transcription engine (openai uses OPENAI_API_KEY; mlx uses local mlx_whisper)', 'openai')
-    .option('--language <code>', 'BCP-47 language hint (e.g., en)')
+    .option('--language <code>', 'language code hint (e.g., en). For mlx, see `mlx_whisper --help` for supported values.')
     .option('--prompt <text>', 'optional prompt to guide transcription')
     .action(async (audio, options) => {
       await assertFileExists(audio);

@@ -65,6 +65,25 @@ export OPENAI_API_KEY=...
 vidtranscribe extract /path/to/video.mp4 --tracks 0,2 --out-dir ./out --transcribe --engine openai --language en
 ```
 
+### Batch: create subtitles for all tracks
+
+Creates subtitles for every audio track in one or more videos using the local `mlx_whisper` engine.
+
+For each input video, output is written to a folder created next to the video file, named after the video filename without its extension.
+
+```bash
+# Writes .srt files into: /path/to/The Simpsons_S33E19_Marge the Meanie/
+vidtranscribe batch "/path/to/The Simpsons_S33E19_Marge the Meanie.mp4"
+
+# Process multiple videos
+vidtranscribe batch /path/to/ep1.mp4 /path/to/ep2.mp4
+
+# If provided, --language is used for transcription AND appended to the subtitle filename
+vidtranscribe batch /path/to/video.mp4 --language en
+```
+
+Note: `mlx_whisper` supports a fixed set of Whisper language codes/names (mostly 2-letter codes). Run `mlx_whisper --help` and check the `--language { ... }` list.
+
 ### Transcribe an audio file
 
 ```bash
