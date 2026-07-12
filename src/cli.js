@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Command } from 'commander';
 import OpenAI from 'openai';
@@ -138,13 +138,26 @@ async function extractAudio({ videoPath, audioIndex, outPath, format }) {
   return finalOut;
 }
 
-async function transcribeWithWhisperOpenAI({ audioPath, outPath, language, prompt }) {
+async function transcribeWithWhisperOpenAI({ audioPath, outPath, language, prompt, verbose = false }) {
+  if (verbose) {
+    process.stderr.write(`[vidtranscribe] Selected engine: openai\n`);
+    process.stderr.write(`[vidtranscribe] Checking if OPENAI_API_KEY is set...\n`);
+  }
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error('OPENAI_API_KEY is not set. Set it to use Whisper transcription.');
   }
 
+  if (verbose) {
+    process.stderr.write(`[vidtranscribe] Reading audio file: ${audioPath}\n`);
+  }
   const client = new OpenAI({ apiKey });
+
+  if (verbose) {
+    process.stderr.write(`[vidtranscribe] Sending transcription request to OpenAI (model: whisper-1)...\n`);
+    if (language) process.stderr.write(`[vidtranscribe] Language hint: ${language}\n`);
+    if (prompt) process.stderr.write(`[vidtranscribe] Prompt hint: ${prompt}\n`);
+  }
 
   const response = await client.audio.transcriptions.create({
     file: fs.createReadStream(audioPath),
@@ -157,21 +170,42 @@ async function transcribeWithWhisperOpenAI({ audioPath, outPath, language, promp
   const text = typeof response === 'string' ? response : String(response);
 
   if (outPath) {
+    if (verbose) {
+      process.stderr.write(`[vidtranscribe] Writing transcript text to file: ${outPath}\n`);
+    }
     await fs.promises.writeFile(outPath, text, 'utf8');
   } else {
+    if (verbose) {
+      process.stderr.write(`[vidtranscribe] Writing transcript text to stdout...\n`);
+    }
     process.stdout.write(text.endsWith('\n') ? text : `${text}\n`);
+  }
+
+  if (verbose) {
+    process.stderr.write(`[vidtranscribe] Transcription complete.\n`);
   }
 
   return text;
 }
 
-async function transcribeWithMlxWhisper({ audioPath, outPath, language, prompt }) {
+async function transcribeWithMlxWhisper({ audioPath, outPath, language, prompt, verbose = false }) {
+  if (verbose) {
+    process.stderr.write(`[vidtranscribe] Selected engine: mlx\n`);
+    process.stderr.write(`[vidtranscribe] Checking if mlx_whisper command is available...\n`);
+  }
   await assertCommandExists('mlx_whisper');
 
   const { outputDir, outputName, expectedSrtPath } = deriveMlxOutput({
     audioPath,
     outPath,
   });
+
+  if (verbose) {
+    process.stderr.write(`[vidtranscribe] Deriving MLX output settings...\n`);
+    process.stderr.write(`[vidtranscribe] Output directory: ${outputDir}\n`);
+    process.stderr.write(`[vidtranscribe] Output name: ${outputName}\n`);
+    process.stderr.write(`[vidtranscribe] Expected SRT path: ${expectedSrtPath}\n`);
+  }
 
   const args = [
     audioPath,
@@ -201,7 +235,42 @@ async function transcribeWithMlxWhisper({ audioPath, outPath, language, prompt }
     outputName,
   ];
 
-  await execFileAsync('mlx_whisper', args);
+  if (verbose) {
+    process.stderr.write(`[vidtranscribe] Running mlx_whisper command...\n`);
+    process.stderr.write(`[vidtranscribe] Command arguments: mlx_whisper ${args.join(' ')}\n`);
+    
+    await new Promise((resolve, reject) => {
+      const child = spawn('mlx_whisper', args, {
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+
+      child.stdout.on('data', (data) => {
+        process.stderr.write(data);
+      });
+      child.stderr.on('data', (data) => {
+        process.stderr.write(data);
+      });
+
+      child.on('close', (code) => {
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error(`mlx_whisper failed with exit code ${code}`));
+        }
+      });
+
+      child.on('error', (err) => {
+        reject(err);
+      });
+    });
+  } else {
+    await execFileAsync('mlx_whisper', args);
+  }
+
+  if (verbose) {
+    process.stderr.write(`[vidtranscribe] Transcription complete.\n`);
+  }
+
   return expectedSrtPath;
 }
 
@@ -421,16 +490,24 @@ export async function main(argv) {
     .option('--engine <openai|mlx>', 'transcription engine (openai uses OPENAI_API_KEY; mlx uses local mlx_whisper)', 'openai')
     .option('--language <code>', 'language code hint (e.g., en). For mlx, see `mlx_whisper --help` for supported values.')
     .option('--prompt <text>', 'optional prompt to guide transcription')
+    .option('-v, --verbose', 'detailed output / progress messages')
     .action(async (audio, options) => {
       await assertFileExists(audio);
 
       const engine = String(options.engine ?? 'openai').toLowerCase();
+      const verbose = !!options.verbose;
+
+      if (verbose) {
+        process.stderr.write(`[vidtranscribe] Starting transcription for audio file: ${audio}\n`);
+      }
+
       if (engine === 'mlx') {
         const srtPath = await transcribeWithMlxWhisper({
           audioPath: audio,
           outPath: options.out,
           language: options.language,
           prompt: options.prompt,
+          verbose,
         });
         process.stdout.write(`${srtPath}\n`);
         return;
@@ -445,6 +522,7 @@ export async function main(argv) {
         outPath: options.out,
         language: options.language,
         prompt: options.prompt,
+        verbose,
       });
     });
 
